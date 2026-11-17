@@ -3,11 +3,9 @@ import logging
 import time
 import warnings
 from dotenv import load_dotenv
-from core.graph import build_financial_graph
 
 load_dotenv()
 warnings.filterwarnings("ignore", category=ResourceWarning)
-# Silence the benign Google GenAI AFC info log
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
 
@@ -24,16 +22,14 @@ def extract_text_from_chunk(content) -> str:
     return ""
 
 
-async def run_langgraph_pipeline(user_query: str):
-    graph = build_financial_graph()
-
+async def analyze_query(graph, user_query: str):
     start_time = time.perf_counter()
     ttft = None
 
-    print(f"\n[LangGraph] Executing workflow for: '{user_query}'...\n" + "=" * 65)
+    print("\n" + "=" * 70)
 
     async for msg_chunk, metadata in graph.astream(
-        {"user_query": user_query},
+        {"user_query": user_query, "dossiers": []},
         stream_mode="messages",
     ):
         if metadata.get("langgraph_node") == "synthesizer":
@@ -44,9 +40,39 @@ async def run_langgraph_pipeline(user_query: str):
                 print(text_token, end="", flush=True)
 
     total_time = time.perf_counter() - start_time
-    print("\n" + "=" * 65)
-    print(f"[Metrics] TTFT: {ttft:.3f}s | Total Graph Execution: {total_time:.3f}s\n")
+    print("\n" + "=" * 70)
+    ttft_str = f"{ttft:.2f}s" if ttft else "N/A"
+    print(f"[Metrics] TTFT: {ttft_str} | End-to-End: {total_time:.2f}s")
+
+
+async def cli_loop():
+    print("\n======================================================================")
+    print("  NeuroPulse Market Agent (LangGraph Map-Reduce CLI)")
+    print("  Try: 'Reliance' | 'Compare Tata Motors vs M&M' | 'Why is Zomato moving?'")
+    print("  Type 'exit' to quit")
+    print("======================================================================")
+
+    # Build graph after banner prints so CLI feels instant
+    from core.graph import build_financial_graph
+    graph = build_financial_graph()
+
+    while True:
+        try:
+            user_input = await asyncio.to_thread(input, "\nQuery > ")
+            query = user_input.strip()
+
+            if not query:
+                continue
+            if query.lower() in {"exit", "quit", "q"}:
+                print("Goodbye!")
+                break
+
+            await analyze_query(graph, query)
+
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting...")
+            break
 
 
 if __name__ == "__main__":
-    asyncio.run(run_langgraph_pipeline("Tata Motors"))
+    asyncio.run(cli_loop())
