@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NeuroPulse Market Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* Clean Markdown styling for chat bubbles & comparison tables */
+    .prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 700; margin-top: 0.75rem; margin-bottom: 0.35rem; color: #f8fafc; }
+    .prose-chat p { margin-bottom: 0.5rem; line-height: 1.55; }
+    .prose-chat ul { list-style-type: disc; padding-left: 1.25rem; margin-bottom: 0.5rem; }
+    .prose-chat li { margin-bottom: 0.25rem; }
+    .prose-chat strong { color: #38bdf8; font-weight: 600; }
+    .prose-chat table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.85rem; }
+    .prose-chat th { background: #1e293b; color: #e2e8f0; text-align: left; padding: 0.5rem; border: 1px solid #334155; }
+    .prose-chat td { padding: 0.5rem; border: 1px solid #334155; color: #cbd5e1; }
+    .prose-chat tr:nth-child(even) { background: rgba(30, 41, 59, 0.45); }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen flex flex-col overflow-hidden font-sans">
+
+  <!-- Top Bar -->
+  <header class="h-14 border-b border-slate-800 bg-slate-900/80 px-5 flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-3">
+      <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+      <h1 class="font-semibold tracking-tight text-slate-100">NeuroPulse Market Agent</h1>
+      <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">LangGraph Map-Reduce</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="threadBadge" class="text-xs text-slate-500 font-mono"></span>
+      <button onclick="resetSession()" class="text-xs px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+        + New Session
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Two-Panel Workspace -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- LEFT PANEL: Minimalist Chatbot -->
+    <main class="flex-1 flex flex-col border-r border-slate-800 bg-slate-950">
+      <div id="chatMessages" class="flex-1 overflow-y-auto p-6 space-y-5">
+        <!-- Welcome Message -->
+        <div class="max-w-3xl bg-slate-900/90 border border-slate-800 rounded-xl p-4 text-sm text-slate-300">
+          <p class="font-medium text-slate-100 mb-1">Ready for Indian (NSE/BSE) & Global Market Intelligence</p>
+          <p class="text-slate-400 text-xs">
+            Try: <span class="text-sky-400 cursor-pointer hover:underline" onclick="quickAsk('Reliance Industries')">"Reliance Industries"</span> ·
+            <span class="text-sky-400 cursor-pointer hover:underline" onclick="quickAsk('Compare Tata Motors vs Mahindra')">"Compare Tata Motors vs Mahindra"</span> ·
+            <span class="text-sky-400 cursor-pointer hover:underline" onclick="quickAsk('Why is Zomato in the news today?')">"Why is Zomato in the news today?"</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Input Bar -->
+      <form id="chatForm" class="p-4 border-t border-slate-800 bg-slate-900/50">
+        <div class="max-w-3xl mx-auto flex gap-2">
+          <input
+            id="queryInput"
+            type="text"
+            placeholder="Ask about any stock, compare companies, or ask follow-up questions..."
+            class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
+            autocomplete="off"
+          />
+          <button
+            id="sendBtn"
+            type="submit"
+            class="px-5 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-sm font-medium text-white transition"
+          >
+            Send
+          </button>
+        </div>
+      </form>
+    </main>
+
+    <!-- RIGHT PANEL: Live Agent & Worker Telemetry Inspector -->
+    <aside class="w-80 lg:w-96 bg-slate-900/60 flex flex-col overflow-y-auto p-4 space-y-5 shrink-0">
+      <div>
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Live Execution Graph</h2>
+
+        <!-- Node 1: Supervisor -->
+        <div id="nodeSupervisor" class="p-3 rounded-lg border border-slate-800 bg-slate-900/80 mb-2.5 transition">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-200">1. Supervisor Router</span>
+            <span id="supStatus" class="text-[11px] font-mono text-slate-500">IDLE</span>
+          </div>
+          <div id="supMeta" class="text-xs text-slate-400 mt-1 hidden"></div>
+        </div>
+
+        <!-- Node 2: Parallel Workers Container -->
+        <div class="p-3 rounded-lg border border-slate-800 bg-slate-900/80 mb-2.5">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold text-slate-200">2. Parallel Research Workers</span>
+            <span id="workerCount" class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">0 active</span>
+          </div>
+          <div id="workersList" class="space-y-2 text-xs text-slate-500">
+            No workers dispatched yet.
+          </div>
+        </div>
+
+        <!-- Node 3: Synthesizer -->
+        <div id="nodeSynthesizer" class="p-3 rounded-lg border border-slate-800 bg-slate-900/80 transition">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-200">3. Streaming Synthesizer</span>
+            <span id="synStatus" class="text-[11px] font-mono text-slate-500">IDLE</span>
+          </div>
+          <div id="synMeta" class="text-xs text-slate-400 mt-1 hidden"></div>
+        </div>
+      </div>
+
+      <!-- Session Memory / Cached Dossiers -->
+      <div class="border-t border-slate-800 pt-4">
+        <div class="flex items-center justify-between mb-2.5">
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Session Memory (Dossiers)</h2>
+          <span id="cacheCount" class="text-[11px] font-mono text-slate-500">0 cached</span>
+        </div>
+        <div id="cachedCards" class="space-y-2 text-xs text-slate-500">
+          Stocks fetched in this chat stay cached for instant follow-ups.
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <script>
+    let threadId = localStorage.getItem("neuropulse_thread") || crypto.randomUUID();
+    localStorage.setItem("neuropulse_thread", threadId);
+    document.getElementById("threadBadge").textContent = `thread: ${threadId.slice(0, 8)}`;
+
+    const cachedDossiers = new Map();
+
+    function resetSession() {
+      threadId = crypto.randomUUID();
+      localStorage.setItem("neuropulse_thread", threadId);
+      document.getElementById("threadBadge").textContent = `thread: ${threadId.slice(0, 8)}`;
+      cachedDossiers.clear();
+      renderCachedCards();
+      document.getElementById("chatMessages").innerHTML = `
+        <div class="max-w-3xl bg-slate-900/90 border border-slate-800 rounded-xl p-4 text-sm text-slate-300">
+          <p class="font-medium text-slate-100">Started fresh session memory.</p>
+        </div>`;
+    }
+
+    function quickAsk(text) {
+      document.getElementById("queryInput").value = text;
+      document.getElementById("chatForm").dispatchEvent(new Event("submit"));
+    }
+
+    function appendMessage(role, initialHtml = "") {
+      const container = document.getElementById("chatMessages");
+      const wrapper = document.createElement("div");
+      wrapper.className = role === "user"
+        ? "max-w-3xl ml-auto flex justify-end"
+        : "max-w-3xl mr-auto";
+
+      const bubble = document.createElement("div");
+      bubble.className = role === "user"
+        ? "bg-sky-600 text-white rounded-2xl rounded-br-sm px-4 py-2.5 text-sm shadow"
+        : "bg-slate-900 border border-slate-800 text-slate-200 rounded-2xl rounded-bl-sm px-5 py-4 text-sm prose-chat w-full shadow";
+
+      bubble.innerHTML = initialHtml;
+      wrapper.appendChild(bubble);
+      container.appendChild(wrapper);
+      container.scrollTop = container.scrollHeight;
+      return bubble;
+    }
+
+    function renderCachedCards() {
+      const container = document.getElementById("cachedCards");
+      document.getElementById("cacheCount").textContent = `${cachedDossiers.size} cached`;
+      if (cachedDossiers.size === 0) {
+        container.innerHTML = "Stocks fetched in this chat stay cached for instant follow-ups.";
+        return;
+      }
+      container.innerHTML = "";
+      cachedDossiers.forEach((d) => {
+        const m = d.metrics || {};
+        const chg = m.day_change_pct;
+        const chgColor = chg > 0 ? "text-emerald-400" : chg < 0 ? "text-rose-400" : "text-slate-400";
+        const chgText = chg != null ? `${chg > 0 ? "+" : ""}${chg}%` : "";
+        const card = document.createElement("div");
+        card.className = "p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between";
+        card.innerHTML = `
+          <div>
+            <div class="font-semibold text-slate-200">${d.ticker}</div>
+            <div class="text-[11px] text-slate-500 truncate max-w-[150px]">${d.company_name || ""}</div>
+          </div>
+          <div class="text-right font-mono">
+            <div class="text-slate-200">${m.currency || ""} ${m.last_price ?? "N/A"}</div>
+            <div class="text-[11px] ${chgColor}">${chgText}</div>
+          </div>`;
+        container.appendChild(card);
+      });
+    }
+
+    document.getElementById("chatForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = document.getElementById("queryInput");
+      const btn = document.getElementById("sendBtn");
+      const query = input.value.trim();
+      if (!query) return;
+
+      input.value = "";
+      input.disabled = true;
+      btn.disabled = true;
+
+      appendMessage("user", query);
+      const assistantBubble = appendMessage("assistant", `<span class="text-slate-500 animate-pulse">Routing query...</span>`);
+
+      // Reset right-side inspector for current turn
+      const supStatus = document.getElementById("supStatus");
+      const supMeta = document.getElementById("supMeta");
+      const workersList = document.getElementById("workersList");
+      const workerCount = document.getElementById("workerCount");
+      const synStatus = document.getElementById("synStatus");
+      const synMeta = document.getElementById("synMeta");
+
+      supStatus.textContent = "RUNNING";
+      supStatus.className = "text-[11px] font-mono text-amber-400";
+      supMeta.classList.add("hidden");
+      workersList.innerHTML = `<span class="text-slate-500">Waiting for Supervisor...</span>`;
+      workerCount.textContent = "0 active";
+      synStatus.textContent = "WAITING";
+      synStatus.className = "text-[11px] font-mono text-slate-500";
+      synMeta.classList.add("hidden");
+
+      let markdownBuffer = "";
+      let activeWorkers = 0;
+      let completedWorkers = 0;
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, thread_id: threadId }),
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+
+          const lines = sseBuffer.split("\n\n");
+          sseBuffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const evt = JSON.parse(line.slice(6));
+
+            if (evt.type === "supervisor_done") {
+              supStatus.textContent = `${evt.elapsed_ms} ms`;
+              supStatus.className = "text-[11px] font-mono text-emerald-400";
+              supMeta.classList.remove("hidden");
+              supMeta.innerHTML = `Intent: <span class="text-sky-400 font-medium">${evt.intent}</span> · Wiki: ${evt.need_fundamentals ? "On" : "Skipped"}`;
+
+              const targets = evt.targets || [];
+              activeWorkers = targets.length;
+              workerCount.textContent = `${activeWorkers} spawned`;
+
+              if (activeWorkers === 0) {
+                workersList.innerHTML = `<span class="text-emerald-400/90">Skipped fetch — answering from cached memory!</span>`;
+              } else {
+                workersList.innerHTML = targets.map((t, idx) => `
+                  <div id="worker-${idx}" class="p-2 rounded bg-slate-950 border border-slate-800 flex items-center justify-between">
+                    <span class="text-slate-300 font-medium">${t}</span>
+                    <span class="text-[11px] font-mono text-amber-400 animate-pulse">Fetching...</span>
+                  </div>
+                `).join("");
+              }
+            }
+
+            else if (evt.type === "worker_done") {
+              const d = evt.dossier;
+              if (d.ticker) {
+                cachedDossiers.set(d.ticker, d);
+                renderCachedCards();
+              }
+              const workerEl = document.getElementById(`worker-${completedWorkers}`);
+              if (workerEl) {
+                workerEl.innerHTML = `
+                  <span class="text-slate-200 font-semibold">${d.ticker || d.query}</span>
+                  <span class="text-[11px] font-mono text-emerald-400">${d.elapsed_ms} ms</span>
+                `;
+              }
+              completedWorkers++;
+              workerCount.textContent = `${completedWorkers}/${activeWorkers} done`;
+            }
+
+            else if (evt.type === "synthesizer_start") {
+              synStatus.textContent = "STREAMING";
+              synStatus.className = "text-[11px] font-mono text-sky-400 animate-pulse";
+              synMeta.classList.remove("hidden");
+              synMeta.textContent = `TTFT: ${(evt.ttft_ms / 1000).toFixed(2)}s`;
+            }
+
+            else if (evt.type === "token") {
+              markdownBuffer += evt.text;
+              assistantBubble.innerHTML = marked.parse(markdownBuffer);
+              const chatBox = document.getElementById("chatMessages");
+              chatBox.scrollTop = chatBox.scrollHeight;
+            }
+
+            else if (evt.type === "done") {
+              synStatus.textContent = `${(evt.total_ms / 1000).toFixed(2)}s total`;
+              synStatus.className = "text-[11px] font-mono text-emerald-400";
+            }
+
+            else if (evt.type === "error") {
+              assistantBubble.innerHTML = `<span class="text-rose-400">Error: ${evt.message}</span>`;
+            }
+          }
+        }
+      } catch (err) {
+        assistantBubble.innerHTML = `<span class="text-rose-400">Connection error: ${err.message}</span>`;
+      } finally {
+        input.disabled = false;
+        btn.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>

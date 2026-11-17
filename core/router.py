@@ -4,25 +4,26 @@ from pydantic import BaseModel, Field
 
 
 class QueryPlan(BaseModel):
-    intent: Literal["single_analysis", "comparison", "news_only"] = Field(
+    intent: Literal["single_analysis", "comparison", "news_only", "follow_up"] = Field(
         description=(
+            "'follow_up' if the user is asking a follow-up question about companies ALREADY present in cached_companies; "
             "'comparison' if comparing 2+ companies/stocks; "
-            "'news_only' if asking only about recent news, catalysts, or why a stock moved today; "
-            "'single_analysis' for general stock analysis or fundamentals."
+            "'news_only' if asking only about recent news or why a stock moved today; "
+            "'single_analysis' for analyzing a new single stock."
         )
     )
-    companies: List[str] = Field(
+    companies_to_fetch: List[str] = Field(
         description=(
-            "List of normalized corporate names or tickers extracted from the query "
-            "(e.g., ['Tata Motors', 'Mahindra & Mahindra'] or ['Reliance Industries'])."
+            "List of NEW corporate names or tickers that need fresh data fetched. "
+            "Leave empty [] if intent is 'follow_up' and all needed companies are already in cached_companies."
         )
     )
     need_fundamentals: bool = Field(
-        description="False if intent is 'news_only' or user only wants quick price/news; True otherwise."
+        description="False if intent is 'news_only' or 'follow_up'; True for new full stock analyses."
     )
     focus_aspect: Optional[str] = Field(
         default=None,
-        description="Specific angle requested by user (e.g., 'EV market share', 'valuation', 'earnings'), or None."
+        description="Specific angle requested by user (e.g., 'valuation', 'momentum', 'risks'), or None."
     )
 
 
@@ -30,7 +31,6 @@ _PLANNER_CHAIN = None
 
 
 def _get_planner_chain():
-    """Lazy-loads LangChain + Gemini structured planner so CLI startup is instant."""
     global _PLANNER_CHAIN
     if _PLANNER_CHAIN is None:
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -45,14 +45,20 @@ def _get_planner_chain():
     return _PLANNER_CHAIN
 
 
-async def plan_query_execution(user_query: str) -> QueryPlan:
-    """Uses Gemini structured output to parse intent, extract multiple entities, and prune unnecessary tools."""
+async def plan_query_execution(user_query: str, cached_companies: List[str] = None) -> QueryPlan:
+    """Parses intent, checks cached memory, and determines which new workers (if any) to spawn."""
     planner = _get_planner_chain()
+    cached_str = ", ".join(cached_companies) if cached_companies else "None"
     prompt = (
-        "Analyze this financial market query and extract an execution plan. "
-        "Expand common Indian/global stock shorthand into full searchable names "
-        "(e.g., 'M&M' -> 'Mahindra & Mahindra', 'RIL' -> 'Reliance Industries', 'Infy' -> 'Infosys').\n\n"
-        f"Query: {user_query}"
+        "Analyze this financial chat message and decide the execution plan.\n"
+        f"Companies already cached in this chat thread: [{cached_str}]\n\n"
+        "Rules:\n"
+        "- If the user asks a follow-up about companies already cached (e.g., 'which one has better momentum?', 'summarize risks'), "
+        "set intent='follow_up' and companies_to_fetch=[].\n"
+        "- If the user asks to add a new company to an existing comparison (e.g., 'now add Maruti'), "
+        "set intent='comparison' and put ONLY the new company in companies_to_fetch.\n"
+        "- Expand shorthand (e.g., 'M&M' -> 'Mahindra & Mahindra', 'RIL' -> 'Reliance Industries').\n\n"
+        f"User Query: {user_query}"
     )
     return await planner.ainvoke(prompt)
 
@@ -60,7 +66,7 @@ async def plan_query_execution(user_query: str) -> QueryPlan:
 async def resolve_ticker(company_query: str, prefer_india: bool = True) -> Dict[str, Any]:
     """Resolves a company name into an exact NSE/BSE or global ticker symbol."""
     def _resolve() -> Dict[str, Any]:
-        import yfinance as yf  # Lazy import so cold startup doesn't freeze
+        import yfinance as yf
 
         clean_query = company_query.strip()
         try:
